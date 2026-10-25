@@ -34,6 +34,16 @@ jobs:
       - name: Автотесты (сеть не нужна — моки OpenAI, BTTV/FFZ/7TV и Helix локальные)
         run: python selftest.py
 
+      # без авторизации логи Actions не достать, поэтому при провале уезжает отчёт
+      - name: Отчёт упавших проверок
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-report
+          path: selftest-report.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
   overlay:
     name: "Оверлей: вкладки и режимы субтитров"
     runs-on: ubuntu-latest

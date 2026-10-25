@@ -1559,8 +1559,11 @@ def test_stt(tmp: Path) -> None:
     names = [key for key, _label in devices if key]
     candidates = input_candidates(names[0]) if names else [None]
     check("после кандидатов идёт «по умолчанию»", candidates[-1] is None, str(candidates))
+    # в headless-CI (Ubuntu runner) звуковых устройств ввода нет вообще —
+    # тогда единственный корректный ответ: «системный по умолчанию»
     check("кандидаты упорядочены, с запасным вариантом",
-          len(candidates) > 1 and candidates[-1] is None and candidates[0] is not None,
+          candidates == [None] or (len(candidates) > 1 and candidates[-1] is None
+                                   and candidates[0] is not None),
           str([device_label(index) for index in candidates][:3]))
 
     # --- PortAudio может отдать незаполненный буфер: такие блоки не должны жить
@@ -2452,6 +2455,17 @@ def main() -> int:
     print(f"Пройдено: {len(PASSED)}   Провалено: {len(FAILED)}")
     for item in FAILED:
         print(f"  ! {item}")
+
+    if FAILED:      # отчёт нужен CI: в артефакт он попадает, а не только в лог
+        report = Path(__file__).resolve().parent / "selftest-report.txt"
+        report.write_text(
+            "\n".join(f"[FAIL] {item}" for item in FAILED)
+            + f"\n\nпройдено {len(PASSED)}, провалено {len(FAILED)}\n"
+            + f"python {sys.version.split()[0]} · platform {sys.platform} · "
+              f"cwd {Path.cwd()}\n",
+            encoding="utf-8",
+        )
+        print(f"отчёт: {report}")
     return 1 if FAILED else 0
 
 

@@ -361,6 +361,15 @@ class Segmenter:
         return utterance
 
 
+def _cuda_library_names() -> tuple[str, ...]:
+    """Имена библиотеки cuBLAS для текущей платформы (CUDA 12)."""
+    if sys.platform == "win32":
+        return ("cublas64_12.dll",)
+    if sys.platform == "darwin":
+        return ("libcublas.12.dylib", "libcublas.dylib")
+    return ("libcublas.so.12", "libcublas.so")
+
+
 def _dll_dirs() -> list[Path]:
     """Где искать CUDA-библиотеки: тулкит, PATH, CUDA_PATH и пакеты nvidia-* из pip."""
     dirs: list[Path] = []
@@ -373,20 +382,39 @@ def _dll_dirs() -> list[Path]:
         value = os.environ.get(key)
         if value:
             dirs += [Path(value) / "bin", Path(value) / "bin" / "x64", Path(value)]
-    for item in (os.environ.get("PATH") or "").split(os.pathsep):
+    for item in (os.environ.get("PATH") or os.environ.get("LD_LIBRARY_PATH") or "").split(os.pathsep):
         if item:
             dirs.append(Path(item))
-    try:  # pip-пакеты nvidia-cublas-cu12 / nvidia-cudnn-cu12 держат DLL здесь
+    if sys.platform != "win32":
+        # linux: /usr/local/cuda-12.x/{lib64,lib} и дебиановый путь multiarch
+        dirs += sorted(Path("/usr/local").glob("cuda*/lib64"))
+        dirs += sorted(Path("/usr/local").glob("cuda*/lib"))
+        dirs += [Path("/usr/lib/x86_64-linux-gnu"), Path("/usr/lib64")]
+    try:  # pip-пакеты nvidia-cublas-cu12 / nvidia-cudnn-cu12 держат библиотеки здесь
         import site
         roots = list(site.getsitepackages())
         user_site = site.getusersitepackages()
         if user_site:
             roots.append(user_site)
         for root in roots:
+            dirs += list((Path(root) / "nvidia").glob("*/lib"))
             dirs += list((Path(root) / "nvidia").glob("*/bin"))
     except Exception:  # noqa: BLE001
         pass
     return dirs
+
+
+def find_cuda_library() -> Path | None:
+    """Первая найденная библиотека cuBLAS 12 (None — CUDA недоступна)."""
+    for folder in _dll_dirs():
+        for name in _cuda_library_names():
+            try:
+                candidate = folder / name
+                if candidate.is_file():
+                    return candidate
+            except OSError:                   # битые символьные ссылки, недоступные пути
+                continue
+    return None
 
 
 #: хендлы os.add_dll_directory: их нельзя терять, иначе папка перестаёт искаться
@@ -395,28 +423,32 @@ _DLL_HANDLES: list = []
 
 @lru_cache(maxsize=1)
 def cuda_ready() -> tuple[bool, str]:
-    """Есть ли CUDA 12 для ctranslate2 (нужен cublas64_12.dll).
+    """Есть ли CUDA 12 для ctranslate2 (нужна библиотека cuBLAS 12).
 
-    Проверяем DLL заранее: без них ctranslate2 либо падает с невнятной ошибкой,
-    либо (на больших моделях) долго висит на инициализации драйвера.
+    Проверяем файл заранее: без него ctranslate2 либо падает с невнятной ошибкой,
+    либо (на больших моделях) долго висит на инициализации драйвера. Ответ должен
+    совпадать с prepare_cuda() на любой платформе — иначе тесты расходятся с CI.
     """
     if os.environ.get("GOVOROK_FORCE_CUDA") == "1" or os.environ.get("BOTTTV_FORCE_CUDA") == "1":
         return True, ""
-    if sys.platform != "win32":
-        return True, ""                       # на Linux пусть решает сама библиотека
-    if not any((folder / "cublas64_12.dll").exists() for folder in _dll_dirs()):
-        return False, "не найдена CUDA 12 (cublas64_12.dll)"
+    if find_cuda_library() is None:
+        return False, f"не найдена CUDA 12 ({_cuda_library_names()[0]})"
     return True, ""
 
 
 def prepare_cuda() -> bool:
     """Прописать папки с CUDA 12 в PATH перед загрузкой модели.
 
-    ctranslate2 тянет cublas через LoadLibrary, а тот ищет DLL по PATH, поэтому
-    просто «увидеть» файл на диске недостаточно — папку надо добавить.
+    На Windows ctranslate2 тянет cuBLAS через LoadLibrary, а тот ищет DLL по PATH,
+    поэтому просто «увидеть» файл на диске недостаточно — папку надо добавить.
+    На Linux поиск идёт через ldconfig/LD_LIBRARY_PATH, поэтому достаточно того,
+    что библиотеку нашли.
     """
-    if not cuda_ready()[0]:
+    library = find_cuda_library()
+    if library is None:
         return False
+    if sys.platform != "win32":
+        return True
     markers = ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn64_9.dll", "cudnn_ops64_9.dll")
     for folder in _dll_dirs():
         try:
