@@ -28,7 +28,7 @@ try:  # чтобы русский текст не превращался в кр
 except Exception:  # noqa: BLE001
     pass
 
-from govorok.config import (AppConfig, CommandConfig, STTConfig, TimerConfig,  # noqa: E402
+from govorok.config import (REDACTED, AppConfig, CommandConfig, STTConfig, TimerConfig,  # noqa: E402
                            TwitchConfig)
 from govorok.irc import (  # noqa: E402
     ChatMessage,
@@ -299,6 +299,9 @@ def patch_helix_urls(base: str):
 
 def mock_config(server: MockServer, **overrides) -> AppConfig:
     cfg = AppConfig()
+    # на случай, если дефолты когда-нибудь начнут приходить из реального конфига:
+    # в тестовые дампы не должны уезжать настоящие ключи
+    cfg.twitch, cfg.llm, cfg.dock = cfg.twitch.masked(), cfg.llm.masked(), cfg.dock.masked()
     cfg.llm.base_url = server.base_url
     cfg.llm.api_key = "test-key"
     cfg.llm.model = "mock-model"
@@ -457,6 +460,34 @@ def test_config_roundtrip(tmp: Path) -> None:
     check("конфиг с BOM читается", bom_cfg.twitch.normalized_channels() == ["xqc"],
           str(bom_cfg.twitch.normalized_channels()))
     check("настройки смайлов из файла", bom_cfg.emotes.ffz is False and bom_cfg.emotes.bttv is True)
+
+    # --- маскирование секретов: redacted()-дамп не должен их содержать
+    redacted = cfg.redacted()
+    check("redacted выжимает секреты",
+          redacted["twitch"]["oauth_token"] == REDACTED
+          and redacted["twitch"]["client_id"] == REDACTED
+          and redacted["llm"]["api_key"] == REDACTED
+          and redacted["dock"]["token"] == REDACTED, str(redacted["llm"]["api_key"]))
+    check("redacted не трогает исходный объект",
+          cfg.twitch.oauth_token == "abc123" and cfg.llm.api_key == "secret"
+          and cfg.twitch.can_send and cfg.is_translation_ready(), "исходник цел")
+    import dataclasses as dc
+    check("masked() вычищает секреты в копиях секций",
+          cfg.twitch.masked().oauth_token == "" and cfg.llm.masked().api_key == ""
+          and cfg.dock.masked().token == ""
+          and all(hasattr(getattr(cfg, s), "masked") for s in ("twitch", "llm", "dock")),
+          str([f.name for f in dc.fields(cfg)]))
+    red_path = tmp / "config.redacted.json"
+    cfg.save(red_path, redact=True)
+    red_text = red_path.read_text(encoding="utf-8")
+    red_loaded = AppConfig.load(red_path)
+    check("save(redact=True) пишет заглушки вместо ключей",
+          "abc123" not in red_text and "secret" not in red_text
+          and red_loaded.llm.api_key == REDACTED
+          and red_loaded.twitch.oauth_token == REDACTED, red_text[:80])
+    check("save(redact=True) не трогает обычный путь",
+          json.loads(path.read_text(encoding="utf-8"))["llm"]["api_key"] == "secret",
+          "обычный save как был")
 
     partial = tmp / "config.partial.json"
     partial.write_text(json.dumps({"llm": {"model": "gpt-x", "unknown": 1}}), encoding="utf-8")
@@ -2049,6 +2080,7 @@ async def test_app_pipeline(tmp: Path) -> None:
         try:
             page = FakePage()
             app = BotApp(page)
+            app.config_save_redacts = True    # ни один save() из окна не пишет секреты
             app.config = mock_config(server)
             # тесты не должны зависеть от пользовательского конфига: субтитры — только
             # настройки, микрофон и модель здесь не нужны
@@ -2217,6 +2249,24 @@ async def test_app_pipeline(tmp: Path) -> None:
                       "движок:" in app.stt_status.value
                       and "настройки: large-v3" in app.stt_status.value,
                       app.stt_status.value[:140])
+
+                # окно писало в тестовый файл настоящие ключи из рабочего конфига —
+                # с config_save_redacts этого быть не должно
+                raw_window = json.loads((tmp / "window-config.json").read_text(encoding="utf-8-sig"))
+                try:
+                    real = json.loads(original_path.read_text(encoding="utf-8-sig")) \
+                        if original_path.exists() else {}
+                except (OSError, json.JSONDecodeError):
+                    real = {}
+                real_secrets = {str(((real.get("twitch") or {}).get("oauth_token") or "")),
+                                str(((real.get("llm") or {}).get("api_key") or "")),
+                                str(((real.get("twitch") or {}).get("client_id") or ""))} - {""}
+                leaked = [s for s in real_secrets if s and s in
+                          (tmp / "window-config.json").read_text(encoding="utf-8-sig")]
+                check("тестовая копия конфига без настоящих ключей",
+                      not leaked and raw_window["twitch"]["oauth_token"] == REDACTED
+                      and raw_window["llm"]["api_key"] == REDACTED,
+                      f"утекло {len(leaked)} значений")
                 app._refresh_meter()          # движок выключен — просто не должно падать
                 check("индикатор уровня обновляется без движка",
                       app.stt_meter.value == 0

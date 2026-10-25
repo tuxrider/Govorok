@@ -146,7 +146,7 @@ def main() -> int:
     if model:
         cfg.stt.model = model
     cfg.stt.enabled = False
-    cfg_path.write_text(json.dumps(cfg.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    cfg_path.write_text(json.dumps(cfg.redacted(), ensure_ascii=False, indent=2), encoding="utf-8")
 
     off = run_case("субтитры выключены", cfg_path, False)
     on = run_case("субтитры включены", cfg_path, True)

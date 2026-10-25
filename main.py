@@ -237,6 +237,9 @@ class BotApp:
 
     def __init__(self, page: ft.Page) -> None:
         self.page = page
+        #: тесты ставят True, чтобы любое сохранение конфига из окна не писало
+        #: настоящие ключи в тестовые копии (см. AppConfig.save(redact=...))
+        self.config_save_redacts = False
         self.config = AppConfig.load()
         self.translator = Translator(self.config, on_log=self.log)
         self.emotes = EmoteRegistry(lambda: self.config, cache_path=EMOTES_CACHE_PATH,
@@ -1156,7 +1159,7 @@ class BotApp:
     async def apply_channels(self) -> None:
         """Enter в поле каналов: подключиться или до-подписаться на новые каналы."""
         self.config.twitch.channels = [self.channel_field.value or ""]
-        self.config.save()
+        self.config.save(redact=self.config_save_redacts)
         desired = self.config.twitch.normalized_channels()
         if not desired:
             self.log("укажите хотя бы один канал")
@@ -1171,7 +1174,7 @@ class BotApp:
 
     async def connect(self) -> None:
         self.config.twitch.channels = [self.channel_field.value or ""]
-        self.config.save()
+        self.config.save(redact=self.config_save_redacts)
         if not self.config.twitch.normalized_channels():
             self.log("укажите хотя бы один канал")
             return
@@ -1588,7 +1591,7 @@ class BotApp:
         cfg.dock.history = max(10, min(500, _int_or(self.dock_history.value, cfg.dock.history)))
         cfg.dock.only_translated = self.dock_only.value
 
-        path = cfg.save()
+        path = cfg.save(redact=self.config_save_redacts)
         self.translator.configure(cfg)
         self.client.config = cfg.twitch
         if emotes_changed:

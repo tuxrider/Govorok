@@ -10,9 +10,12 @@ import json
 import os
 import shutil
 import sys
-from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
+
+#: чем заменяются секреты в дампах конфигов (логов, тестов, отчётов диагностики)
+REDACTED = "<redacted>"
 
 #: папка с кодом и ресурсами (assets/dock/index.html и т.п.)
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -99,6 +102,10 @@ class TwitchConfig:
     oauth_token: str = ""       # "oauth:xxxx" или просто токен
     client_id: str = ""         # Client-Id приложения: нужен только для списка зрителей
 
+    def masked(self) -> "TwitchConfig":
+        """Копия без токена и Client-Id: для тестовых дампов, логов и скриншотов."""
+        return replace(self, oauth_token="", client_id="")
+
     @property
     def can_send(self) -> bool:
         return bool(self.nickname.strip() and self.oauth_token.strip())
@@ -128,6 +135,10 @@ class LLMConfig:
 
     base_url: str = "https://api.deepseek.com/v1"
     api_key: str = ""
+
+    def masked(self) -> "LLMConfig":
+        """Копия с выключенным API-ключом."""
+        return replace(self, api_key="")
     model: str = "deepseek-chat"
     timeout: float = 25.0
     max_concurrency: int = 4
@@ -201,6 +212,10 @@ class DockConfig:
     host: str = "127.0.0.1"      # 0.0.0.0 — если OBS на другом компьютере (нужен токен)
     port: int = 8765
     token: str = ""              # проверяется в ссылке; для не-loopback создаётся сам
+
+    def masked(self) -> "DockConfig":
+        """Копия без токена доступа к доку."""
+        return replace(self, token="")
     path: str = "/dock"
     history: int = 60            # сколько сообщений отдавать док-панели
     only_translated: bool = True # начальное состояние фильтра «только перевод»
@@ -377,11 +392,31 @@ class AppConfig:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-    def save(self, path: Path | None = None) -> Path:
+    def redacted(self) -> dict[str, Any]:
+        """Словарь без секретов: для тестовых дампов, логов и отчётов диагностики.
+
+        Нужен, чтобы копия конфига (её пишут selftest и tools/) не утаскивала за
+        собой OAuth-токен Twitch, API-ключ провайдера и токен доступа к доку.
+        Рабочий конфиг в %APPDATA% при этом не трогается: маскируется только
+        возвращаемый словарь, а не сам объект.
+        """
+        data = asdict(self)
+        for section, field in (("twitch", ("oauth_token", "client_id")),
+                               ("llm", ("api_key",)),
+                               ("dock", ("token",))):
+            block = data.get(section)
+            if isinstance(block, dict):
+                for key in field:
+                    block[key] = REDACTED
+        return data
+
+    def save(self, path: Path | None = None, *, redact: bool = False) -> Path:
+        """Сохранить конфиг. `redact=True` — выжать секреты (для тестовых копий)."""
         target = Path(path) if path else CONFIG_PATH
         target.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.redacted() if redact else self.to_dict()
         target.write_text(
-            json.dumps(self.to_dict(), ensure_ascii=False, indent=2),
+            json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         return target
