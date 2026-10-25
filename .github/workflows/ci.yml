@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   python:
-    name: Python — IRC, перевод, док, субтитры
+    name: "Python: IRC, перевод, док, субтитры"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +31,11 @@ jobs:
       - name: Синтаксис всех модулей
         run: python -m py_compile main.py selftest.py govorok/*.py tools/*.py
 
-      - name: Автотесты (сеть не нужна: OpenAI, BTTV/FFZ/7TV и Helix мокаются локально)
+      - name: Автотесты (сеть не нужна — моки OpenAI, BTTV/FFZ/7TV и Helix локальные)
         run: python selftest.py
 
   overlay:
-    name: Оверлей субтитров — логика вкладок и режимов
+    name: "Оверлей: вкладки и режимы субтитров"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

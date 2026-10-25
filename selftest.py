@@ -1961,6 +1961,48 @@ def test_overlay_modes() -> None:
           tail[0] + " " + (done.stderr or "")[:150])
 
 
+def test_ci_workflows() -> None:
+    print("\n[ci] Конфиг GitHub Actions разбирается и ссылается на реальные файлы")
+    import glob
+    import re
+
+    try:
+        import yaml
+    except ImportError:
+        check("pyyaml установлен", False, "pip install pyyaml")
+        return
+
+    files = sorted(Path(x) for x in glob.glob(".github/workflows/*.yml")
+                   + glob.glob(".github/workflows/*.yaml"))
+    check("workflow-файлы найдены", bool(files), str(files))
+    for path in files:
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 - ровно то, из-за чего CI падает без джобов
+            check(f"{path.name}: YAML валиден", False, f"{type(exc).__name__}: {exc}")
+            continue
+        check(f"{path.name}: YAML валиден", isinstance(doc, dict) and "jobs" in doc, str(doc)[:80])
+        jobs = (doc or {}).get("jobs") or {}
+        check(f"{path.name}: есть джобы", bool(jobs), str(list(jobs))[:80])
+        for name, job in jobs.items():
+            check(f"{path.name}/{name}: runs-on задан", bool(job.get("runs-on")), str(job)[:60])
+            steps = job.get("steps") or []
+            check(f"{path.name}/{name}: шаги непустые", bool(steps) and all(
+                s.get("run") or s.get("uses") for s in steps), f"{len(steps)} шагов")
+            for step in steps:
+                # имя шага без кавычек и с «: » ломает весь YAML — ловим здесь
+                label = step.get("name")
+                check(f"{path.name}/{name}: имя шага корректно",
+                      label is None or isinstance(label, str), str(label)[:60])
+                run = step.get("run") or ""
+                for ref in re.findall(r"(?:assets|govorok|tools|docs|vendor)/[\w./-]+", run):
+                    clean = ref.rstrip(".")
+                    if "*" in clean:
+                        continue
+                    check(f"{path.name}/{name}: путь {ref} существует",
+                          Path(ref).exists(), str(ref))
+
+
 def test_ui_build() -> None:
     print("\n[5/13] Окно настроек (Flet)")
     import flet as ft
@@ -2356,7 +2398,7 @@ def main() -> int:
     parser.add_argument("--seconds", type=float, default=20.0, help="сколько слушать чат")
     parser.add_argument("--only", default="",
                         help="только эти секции через запятую: irc,config,heuristics,translation,ui,"
-                             "emotes,registry,font,dock,dockrun,viewers,commands,stt,overlay,pipeline")
+                             "emotes,registry,font,dock,dockrun,viewers,commands,stt,overlay,ci,pipeline")
     args = parser.parse_args()
 
     tmp = Path(__file__).resolve().parent / ".selftest-tmp"
@@ -2377,6 +2419,8 @@ def main() -> int:
         asyncio.run(test_translation_flow())
     if wanted("overlay"):
         test_overlay_modes()
+    if wanted("ci"):
+        test_ci_workflows()
     if wanted("ui"):
         test_ui_build()
     if wanted("emotes"):

@@ -4,3 +4,4 @@ websockets>=12
 faster-whisper>=1.1
 sounddevice>=0.4.6
 numpy>=1.26
+pyyaml>=6.0      # selftest проверяет, что .github/workflows/*.yml вообще парсятся
