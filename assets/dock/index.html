@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Govorok — чат</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-alt:#1c2230; --line:#262d3a;
+    --text:#e6edf3; --muted:#8b949e; --accent:#a78bfa; --ok:#3fb950;
+    --warn:#d29922; --err:#f85149; --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --size:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text); font-family:var(--font);
+    font-size:var(--size); display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--panel);
+    border-bottom:1px solid var(--line); flex:0 0 auto; flex-wrap:wrap;
+  }
+  header.hidden{display:none}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+  .dot.online{background:var(--ok)} .dot.error{background:var(--err)} .dot.waiting{background:var(--warn)}
+  .title{font-weight:600; letter-spacing:.2px}
+  .stat{color:var(--muted); font-size:.85em; white-space:nowrap}
+  .spacer{flex:1 1 auto}
+  label.toggle{display:flex; align-items:center; gap:4px; color:var(--muted); font-size:.85em; cursor:pointer; user-select:none}
+  label.toggle.hidden{display:none}
+
+  nav{display:flex; background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto}
+  nav button{
+    flex:1 1 0; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted);
+    font:inherit; font-size:.86em; padding:6px 4px; cursor:pointer;
+  }
+  nav button.active{color:var(--text); border-bottom-color:var(--accent); font-weight:600}
+  nav button:hover{color:var(--text)}
+
+  main{flex:1 1 auto; min-width:0; overflow-y:auto; overflow-x:hidden; padding:8px; scrollbar-width:thin}
+  main.hidden{display:none}
+  main::-webkit-scrollbar,section#stats::-webkit-scrollbar{width:8px}
+  main::-webkit-scrollbar-thumb,section#stats::-webkit-scrollbar-thumb{background:#30363d; border-radius:4px}
+  .empty{color:var(--muted); text-align:center; padding:18px 8px; font-size:.9em}
+  .msg{
+    background:var(--panel); border:1px solid var(--line); border-radius:8px;
+    padding:5px 8px; margin-bottom:4px; min-width:0;
+    overflow-wrap:anywhere; word-break:break-word;
+  }
+  .msg.translated{border-color:var(--accent); background:rgba(167,139,250,.07)}
+  .msg.own{border-color:rgba(63,185,80,.55); background:rgba(63,185,80,.06)}
+  .msg.hidden{display:none}
+  .msg:hover{border-color:#3d4757}
+  .msg.replied{border-color:var(--ok)}
+  .head{display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; font-size:.82em}
+  .time{color:var(--muted)}
+  .nick{font-weight:700}
+  .chan{color:var(--muted)}
+  .badge{font-size:.72em; font-weight:700; padding:1px 4px; border-radius:4px; text-transform:uppercase}
+  .badge.STREAMER{color:#f85149;background:#2d1417}
+  .badge.MOD{color:#3fb950;background:#122417}
+  .badge.VIP{color:#d2a8ff;background:#241a33}
+  .badge.SUB{color:#79c0ff;background:#101f33}
+  .badge.BOT{color:#a78bfa;background:#241a33}
+  .src{font-size:.72em; color:var(--accent); border:1px solid rgba(167,139,250,.45);
+    border-radius:4px; padding:0 4px}
+  .body{margin-top:2px; line-height:1.35; overflow-wrap:anywhere}
+  .body img.emote{height:1.5em; width:auto; max-width:100%; vertical-align:-.35em; margin:0 1px}
+  .tr{margin-top:4px; padding-left:8px; border-left:2px solid var(--accent)}
+  .tr .meta{display:flex; align-items:center; gap:5px; font-size:.78em; color:var(--accent)}
+  .tr .meta .cached{color:var(--muted)}
+  .tr .text{margin-top:1px; color:#e9e3ff}
+  .tr.pending .text, .tr.error .text{color:var(--muted); font-size:.9em}
+  .tr.error{border-left-color:var(--err)} .tr.error .meta{color:var(--err)}
+  .notice{color:var(--muted); font-style:italic; font-size:.85em; text-align:center; padding:3px 0}
+
+  #jump{
+    position:fixed; left:50%; transform:translateX(-50%); bottom:54px; display:none;
+    background:var(--accent); color:#12091f; border:none; border-radius:14px;
+    padding:5px 12px; font:inherit; font-size:.82em; font-weight:600; cursor:pointer;
+    box-shadow:0 4px 14px rgba(0,0,0,.45); z-index:5;
+  }
+  #jump.show{display:block}
+  #offline{
+    display:none; padding:5px 10px; background:rgba(248,81,73,.12); color:var(--err);
+    font-size:.85em; border-top:1px solid rgba(248,81,73,.3); flex:0 0 auto;
+  }
+  #offline.show{display:block}
+
+  form#composer{
+    display:flex; gap:6px; padding:6px 8px; background:var(--panel);
+    border-top:1px solid var(--line); flex:0 0 auto;
+  }
+  form#composer.hidden{display:none}
+  #reply{
+    flex:1 1 auto; min-width:0; background:var(--bg); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:6px 8px; font:inherit; font-size:.92em;
+  }
+  #reply:focus{outline:none; border-color:var(--accent)}
+  #reply:disabled{color:var(--muted); background:var(--panel-alt)}
+  #send{
+    background:var(--accent); color:#12091f; border:none; border-radius:8px;
+    padding:6px 12px; font:inherit; font-weight:700; cursor:pointer;
+  }
+  #send:disabled{background:var(--panel-alt); color:var(--muted); cursor:default}
+  #feedback{
+    display:none; padding:4px 10px; font-size:.82em; flex:0 0 auto;
+    border-top:1px solid var(--line); background:var(--panel-alt); color:var(--muted);
+  }
+  #feedback.show{display:block}
+  #feedback.ok{color:var(--ok)} #feedback.bad{color:var(--err)}
+
+  #reply-bar{
+    display:none; align-items:center; gap:6px; padding:4px 10px; background:var(--panel-alt);
+    border-top:1px solid var(--line); font-size:.82em; color:var(--accent); flex:0 0 auto;
+  }
+  #reply-bar.show{display:flex}
+  #reply-bar .nick{color:var(--text); font-weight:600}
+  #reply-cancel{margin-left:auto; background:none; border:none; color:var(--muted);
+    font:inherit; cursor:pointer; padding:0 2px}
+  #reply-cancel:hover{color:var(--err)}
+
+  section#stats{flex:1 1 auto; min-width:0; overflow-y:auto; padding:8px}
+  section#stats.hidden{display:none}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(84px,1fr)); gap:6px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 8px}
+  .card .k{color:var(--muted); font-size:.74em; text-transform:uppercase; letter-spacing:.3px}
+  .card .v{font-size:1.25em; font-weight:700; margin-top:2px}
+  .card .v small{font-size:.6em; color:var(--muted); font-weight:400}
+  .block{background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; margin-top:6px}
+  .block-title{color:var(--accent); font-size:.8em; font-weight:700; text-transform:uppercase;
+    letter-spacing:.4px; margin-bottom:6px}
+  .rows{display:flex; flex-direction:column; gap:3px}
+  .row{display:flex; gap:8px; align-items:baseline; font-size:.9em}
+  .row .rk{color:var(--muted)}
+  .row .rv{margin-left:auto; font-weight:600; white-space:nowrap}
+  .lang{display:flex; align-items:center; gap:8px; font-size:.9em; margin-bottom:4px}
+  .lang .name{flex:0 0 auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .lang .bar{flex:1 1 auto; height:6px; background:var(--panel-alt); border-radius:3px; overflow:hidden}
+  .lang .bar i{display:block; height:100%; background:var(--accent)}
+  .lang .cnt{flex:0 0 auto; color:var(--muted); font-size:.85em; white-space:nowrap}
+  button.ghost{
+    margin-top:8px; width:100%; background:none; color:var(--muted); border:1px solid var(--line);
+    border-radius:8px; padding:6px; font:inherit; font-size:.86em; cursor:pointer;
+  }
+  button.ghost:hover{color:var(--err); border-color:var(--err)}
+
+  section#viewers{flex:1 1 auto; min-width:0; overflow-y:auto; padding:8px}
+  section#viewers.hidden{display:none}
+  .v-tools{display:flex; gap:6px; align-items:center; margin-bottom:6px}
+  #v-search{
+    flex:1 1 auto; min-width:0; background:var(--bg); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:5px 8px; font:inherit; font-size:.88em;
+  }
+  #v-search:focus{outline:none; border-color:var(--accent)}
+  .viewer{
+    background:var(--panel); border:1px solid var(--line); border-radius:8px;
+    padding:5px 8px; margin-bottom:4px; min-width:0;
+  }
+  .viewer.hidden{display:none}
+  .viewer.offline{opacity:.55}
+  .viewer.lurker{background:var(--panel-alt)}
+  .v-head{display:flex; align-items:baseline; gap:6px; font-size:.88em; flex-wrap:wrap}
+  .v-head .mark{width:7px; height:7px; border-radius:50%; background:var(--muted); flex:0 0 auto}
+  .viewer.online .v-head .mark{background:var(--ok)}
+  .viewer.active .v-head .mark{background:var(--accent)}
+  .v-head .v-right{margin-left:auto; color:var(--muted); font-size:.85em; white-space:nowrap}
+  .v-group{font-size:.72em; color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:0 4px}
+</style>
+</head>
+<body>
+<header id="header">
+  <span class="dot" id="dot"></span>
+  <span class="title" id="title">Govorok</span>
+  <span class="stat" id="channels"></span>
+  <span class="spacer"></span>
+  <span class="stat" id="counters">0 / 0</span>
+  <label class="toggle" id="only-wrap" title="Показывать только переведённые сообщения">
+    <input type="checkbox" id="only"> только перевод
+  </label>
+</header>
+
+<nav id="tabs">
+  <button class="tab active" data-tab="chat">Чат</button>
+  <button class="tab" data-tab="viewers">Зрители</button>
+  <button class="tab" data-tab="stats">Статистика</button>
+</nav>
+
+<main id="feed"><div class="empty" id="empty">Подключаюсь к Govorok…</div></main>
+
+<section id="viewers" class="hidden">
+  <div class="v-tools">
+    <input id="v-search" placeholder="поиск по нику…" autocomplete="off">
+    <label class="toggle" title="Только те, кто пишет сейчас">
+      <input type="checkbox" id="v-online"> в чате
+    </label>
+  </div>
+  <div class="cards" id="v-cards"></div>
+  <div class="block" style="margin-top:6px">
+    <div class="rows" id="v-note"></div>
+  </div>
+  <div id="v-list"><div class="empty">пока никого не видно</div></div>
+</section>
+
+<section id="stats" class="hidden">
+  <div class="cards" id="s-cards"></div>
+  <div class="block">
+    <div class="block-title">Топ языков чата</div>
+    <div id="s-langs"><div class="empty">пока нет данных</div></div>
+  </div>
+  <div class="block">
+    <div class="block-title">Расход на API</div>
+    <div class="rows" id="s-api"></div>
+  </div>
+  <div class="block">
+    <div class="block-title">Сессия</div>
+    <div class="rows" id="s-other"></div>
+  </div>
+  <button class="ghost" id="reset-stats">Сбросить статистику</button>
+</section>
+
+<form id="composer" autocomplete="off">
+  <input id="reply" placeholder="Ответить в чат…" maxlength="500">
+  <button id="send" type="submit" title="Отправить (Enter)">➤</button>
+</form><div id="reply-bar">
+  <span>↩ ответ</span>
+  <span class="nick" id="reply-label"></span>
+  <button type="button" id="reply-cancel" title="Отменить ответ">✕</button>
+</div>
+<div id="feedback"></div>
+<button id="jump">↓ новые сообщения</button>
+<div id="offline">Нет связи с Govorok — проверьте, что бот запущен. Переподключение…</div>
+
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const token = params.get("token") || "";
+  const limit = Math.max(10, Math.min(500, parseInt(params.get("limit") || "120", 10) || 120));
+  const onlyFromUrl = params.get("only");
+  const showHeader = params.get("header") !== "0";
+  const fontSize = parseInt(params.get("size") || "0", 10);
+  const fontFamily = params.get("font") || "";
+
+  const root = document.documentElement;
+  const sizeFromUrl = fontSize > 0;
+  const fontFromUrl = Boolean(fontFamily);
+  const defaultFont = 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+  if (sizeFromUrl) root.style.setProperty("--size", fontSize + "px");
+  if (fontFromUrl) root.style.setProperty("--font", `"${fontFamily}", system-ui, sans-serif`);
+
+  const NICK_COLORS = ["#ff7b72", "#79c0ff", "#7ee787", "#ffa657",
+                       "#d2a8ff", "#56d4dd", "#f778ba", "#a5d6ff"];
+
+  function nickColor(payload) {
+    if (payload.color) return payload.color;
+    let sum = 0;
+    for (const ch of String(payload.user || payload.display || "")) sum += ch.codePointAt(0);
+    return NICK_COLORS[sum % NICK_COLORS.length];
+  }
+  if (!showHeader) document.getElementById("header").classList.add("hidden");
+
+  const feed = document.getElementById("feed");
+  const empty = document.getElementById("empty");
+  const dot = document.getElementById("dot");
+  const title = document.getElementById("title");
+  const channels = document.getElementById("channels");
+  const counters = document.getElementById("counters");
+  const offline = document.getElementById("offline");
+  const jump = document.getElementById("jump");
+  const only = document.getElementById("only");
+  const onlyWrap = document.getElementById("only-wrap");
+  const statsView = document.getElementById("stats");
+  const viewersView = document.getElementById("viewers");
+  const vSearch = document.getElementById("v-search");
+  const vOnline = document.getElementById("v-online");
+  const vList = document.getElementById("v-list");
+  const vCards = document.getElementById("v-cards");
+  const vNote = document.getElementById("v-note");
+  const composer = document.getElementById("composer");
+  const reply = document.getElementById("reply");
+  const sendButton = document.getElementById("send");
+  const feedback = document.getElementById("feedback");
+  const replyBar = document.getElementById("reply-bar");
+  const replyLabel = document.getElementById("reply-label");
+  const replyCancel = document.getElementById("reply-cancel");
+
+  const storeKey = "govorok.only." + location.host + location.pathname;
+  const legacyKey = "botttv.only." + location.host + location.pathname;
+  const storedOnly = localStorage.getItem(storeKey) ?? localStorage.getItem(legacyKey);
+  only.checked = onlyFromUrl !== null ? onlyFromUrl !== "0" : storedOnly === "1";
+  only.addEventListener("change", () => {
+    localStorage.setItem(storeKey, only.checked ? "1" : "0");
+    applyFilter();
+  });
+
+  const nodes = new Map();
+  const order = [];
+  let translated = 0, total = 0;
+  let stick = true;
+  let canSend = false;
+  let socket = null, retry = 0, timer = null;
+
+  function setStatus(state, text) {
+    dot.className = "dot " + (state || "");
+    if (text) title.textContent = text;
+  }
+
+  function updateCounters() {
+    counters.textContent = translated + " / " + total;
+  }
+
+  function flash(text, kind) {
+    feedback.textContent = text;
+    feedback.className = "show " + (kind || "");
+    clearTimeout(flash.timer);
+    flash.timer = setTimeout(() => { feedback.className = ""; }, 4000);
+  }
+
+  /* ------------------------------------------------------------- вкладки */
+
+  function setTab(name) {
+    localStorage.setItem("govorok.tab", name);
+    document.querySelectorAll("nav button").forEach(button => {
+      button.classList.toggle("active", button.dataset.tab === name);
+    });
+    const isChat = name === "chat";
+    feed.classList.toggle("hidden", !isChat);
+    statsView.classList.toggle("hidden", name !== "stats");
+    viewersView.classList.toggle("hidden", name !== "viewers");
+    composer.classList.toggle("hidden", !isChat);
+    onlyWrap.classList.toggle("hidden", !isChat);
+    jump.classList.toggle("show", isChat && jump.dataset.wanted === "1");
+    if (name === "stats") requestStats();
+    if (name === "viewers") { requestViewers(); startViewerTimer(); } else { stopViewerTimer(); }
+  }
+
+  document.querySelectorAll("nav button").forEach(button => {
+    button.addEventListener("click", () => setTab(button.dataset.tab));
+  });
+
+  /* --------------------------------------------------------------- фильтр */
+
+  function isVisible(node) {
+    if (!only.checked) return true;
+    return node.classList.contains("translated") || node.dataset.pending === "1";
+  }
+
+  function applyFilter() {
+    nodes.forEach(node => node.classList.toggle("hidden", !isVisible(node)));
+  }
+
+  /* ------------------------------------------------------------- сообщения */
+
+  function makeSegments(segments) {
+    const wrap = document.createElement("div");
+    wrap.className = "body";
+    (segments || []).forEach(seg => {
+      if (seg.t === "emote" && seg.u) {
+        const img = document.createElement("img");
+        img.className = "emote";
+        img.src = seg.u;
+        img.alt = seg.v || "";
+        img.title = seg.v ? seg.v + (seg.p ? " · " + seg.p.toUpperCase() : "") : "";
+        img.loading = "lazy";
+        wrap.appendChild(img);
+      } else {
+        wrap.appendChild(document.createTextNode(seg.v || ""));
+      }
+    });
+    return wrap;
+  }
+
+  function makeMessage(payload) {
+    const node = document.createElement("div");
+    node.className = "msg" + (payload.own ? " own" : "");
+    node.dataset.id = payload.id;
+    node.dataset.pending = payload.pending ? "1" : "0";
+
+    const head = document.createElement("div");
+    head.className = "head";
+
+    const time = document.createElement("span");
+    time.className = "time";
+    time.textContent = new Date((payload.ts || 0) * 1000).toLocaleTimeString();
+    head.appendChild(time);
+
+    (payload.badges || []).forEach(label => {
+      const badge = document.createElement("span");
+      badge.className = "badge " + label;
+      badge.textContent = label === "STREAMER" ? "streamer" : label.toLowerCase();
+      head.appendChild(badge);
+    });
+
+    const nick = document.createElement("span");
+    nick.className = "nick";
+    nick.textContent = payload.display || payload.user || "?";
+    nick.style.color = nickColor(payload);
+    head.appendChild(nick);
+
+    if (payload.channel) {
+      const chan = document.createElement("span");
+      chan.className = "chan";
+      chan.textContent = "#" + payload.channel;
+      head.appendChild(chan);
+    }
+
+    if (payload.source) {
+      const src = document.createElement("span");
+      src.className = "src";
+      src.textContent = payload.source === "timer" ? "⏱ таймер" : "⚡ команда";
+      head.appendChild(src);
+    }
+
+    node.appendChild(head);
+    node.appendChild(makeSegments(payload.segments));
+    if (payload.pending) renderPending(node);
+    if (payload.translation) applyTranslation(node, payload.translation);
+    if (!payload.own) {
+      node.title = "Нажмите, чтобы ответить @" + (payload.user || "");
+      node.addEventListener("click", () => startReply(payload, node));
+    }
+    return node;
+  }
+
+  function ensureBlock(node) {
+    let block = node.querySelector(".tr");
+    if (block) return block;
+    block = document.createElement("div");
+    block.className = "tr";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const label = document.createElement("span");
+    label.className = "label";
+    meta.appendChild(label);
+    const text = document.createElement("div");
+    text.className = "text";
+    block.appendChild(meta);
+    block.appendChild(text);
+    node.appendChild(block);
+    return block;
+  }
+
+  function renderPending(node) {
+    const block = ensureBlock(node);
+    block.classList.add("pending");
+    block.classList.remove("error");
+    block.querySelector(".label").textContent = "перевод…";
+    block.querySelector(".text").textContent = "";
+  }
+
+  function applyTranslation(node, tr) {
+    node.dataset.pending = "0";
+    if (tr.error) {
+      const block = ensureBlock(node);
+      block.classList.remove("pending");
+      block.classList.add("error");
+      block.querySelector(".label").textContent = "перевод не удался";
+      block.querySelector(".text").textContent = tr.error;
+      applyFilter();
+      return;
+    }
+    if (!tr.text) {
+      const block = node.querySelector(".tr");
+      if (block) block.remove();
+      node.classList.remove("translated");
+      applyFilter();
+      return;
+    }
+    const block = ensureBlock(node);
+    block.classList.remove("pending", "error");
+    const label = block.querySelector(".label");
+    label.textContent = (tr.lang || "??").toUpperCase() + " → " + (tr.target || "RU").toUpperCase();
+    if (tr.cached) {
+      const cached = document.createElement("span");
+      cached.className = "cached";
+      cached.textContent = "из кэша";
+      label.appendChild(document.createTextNode(" "));
+      label.appendChild(cached);
+    }
+    block.querySelector(".text").textContent = tr.text;
+    node.classList.add("translated");
+    applyFilter();
+  }
+
+  function trim() {
+    while (order.length > limit) {
+      const id = order.shift();
+      const node = nodes.get(id);
+      if (node) node.remove();
+      nodes.delete(id);
+    }
+    if (nodes.size === 0) empty.style.display = "";
+  }
+
+  function addMessage(payload) {
+    empty.style.display = "none";
+    const node = makeMessage(payload);
+    nodes.set(payload.id, node);
+    order.push(payload.id);
+    feed.appendChild(node);
+    trim();
+    applyFilter();
+  }
+
+  function scrollToBottom() {
+    feed.scrollTop = feed.scrollHeight;
+    jump.classList.remove("show");
+    jump.dataset.wanted = "0";
+  }
+
+  feed.addEventListener("scroll", () => {
+    stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+    if (stick) { jump.classList.remove("show"); jump.dataset.wanted = "0"; }
+  });
+  jump.addEventListener("click", scrollToBottom);
+
+  /* ------------------------------------------------------------ статистика */
+
+  function card(title, value, hint) {
+    const node = document.createElement("div");
+    node.className = "card";
+    const k = document.createElement("div");
+    k.className = "k";
+    k.textContent = title;
+    const v = document.createElement("div");
+    v.className = "v";
+    v.textContent = value;
+    if (hint) {
+      const small = document.createElement("small");
+      small.textContent = " " + hint;
+      v.appendChild(small);
+    }
+    node.appendChild(k);
+    node.appendChild(v);
+    return node;
+  }
+
+  function row(key, value) {
+    const node = document.createElement("div");
+    node.className = "row";
+    const k = document.createElement("span");
+    k.className = "rk";
+    k.textContent = key;
+    const v = document.createElement("span");
+    v.className = "rv";
+    v.textContent = value;
+    node.appendChild(k);
+    node.appendChild(v);
+    return node;
+  }
+
+  function renderStats(s) {
+    if (!s) return;
+    total = Math.max(total, s.messages || 0);
+    translated = Math.max(translated, s.translated || 0);
+    updateCounters();
+
+    const cards = document.getElementById("s-cards");
+    cards.innerHTML = "";
+    cards.appendChild(card("сообщений", String(s.messages || 0)));
+    cards.appendChild(card("переведено", String(s.translated || 0), (s.translated_share || 0) + "%"));
+    cards.appendChild(card("пропущено", String(s.skipped || 0)));
+    cards.appendChild(card("ошибок", String(s.errors || 0)));
+
+    const langs = document.getElementById("s-langs");
+    langs.innerHTML = "";
+    if (!(s.languages || []).length) {
+      const none = document.createElement("div");
+      none.className = "empty";
+      none.textContent = "пока нет данных";
+      langs.appendChild(none);
+    } else {
+      s.languages.forEach(item => {
+        const line = document.createElement("div");
+        line.className = "lang";
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = item.title;
+        name.title = item.title;
+        const bar = document.createElement("span");
+        bar.className = "bar";
+        const fill = document.createElement("i");
+        fill.style.width = Math.max(2, Math.min(100, item.share)) + "%";
+        bar.appendChild(fill);
+        const cnt = document.createElement("span");
+        cnt.className = "cnt";
+        cnt.textContent = item.count + " · " + item.share + "%";
+        line.appendChild(name);
+        line.appendChild(bar);
+        line.appendChild(cnt);
+        langs.appendChild(line);
+      });
+    }
+
+    const api = document.getElementById("s-api");
+    api.innerHTML = "";
+    api.appendChild(row("запросов к модели", String(s.requests || 0)));
+    api.appendChild(row("взято из кэша", String(s.cache_hits || 0)));
+    api.appendChild(row("ошибок API", String(s.failures || 0)));
+    api.appendChild(row("токенов на входе", String(s.prompt_tokens || 0)));
+    api.appendChild(row("токенов на выходе", String(s.completion_tokens || 0)));
+    api.appendChild(row("символов отправлено", String(s.characters || 0)));
+    api.appendChild(row("средний ответ", (s.avg_latency_ms || 0) + " мс"));
+    if (s.cost === null || s.cost === undefined) {
+      api.appendChild(row("расход", "цены не заданы"));
+    } else {
+      api.appendChild(row("расход", s.cost.toFixed(4) + " " + (s.currency || "USD")));
+    }
+
+    const other = document.getElementById("s-other");
+    other.innerHTML = "";
+    other.appendChild(row("в сессии", s.uptime_text || "—"));
+    other.appendChild(row("каналы", (s.channels || []).map(c => "#" + c).join(" ") || "—"));
+    other.appendChild(row("отправлено ботом", String(s.sent || 0)));
+    other.appendChild(row("команд сработало", String(s.commands_fired || 0)));
+    other.appendChild(row("таймеров отправлено", String(s.timers_fired || 0)));
+    other.appendChild(row("док-клиентов", String(s.clients || 0)));
+    other.appendChild(row("смайлов", s.emotes ? (s.emotes.global || 0) + " + " + (s.emotes.channels || 0) : "0"));
+    other.appendChild(row("модель", s.model || "—"));
+  }
+
+  function requestStats() {
+    if (socket && socket.readyState === 1) socket.send(JSON.stringify({ t: "stats" }));
+  }
+
+  /* -------------------------------------------------------------- зрители */
+
+  let lastViewers = null;
+  let viewerTimer = null;
+
+  function requestViewers() {
+    if (socket && socket.readyState === 1) socket.send(JSON.stringify({ t: "viewers" }));
+  }
+
+  function startViewerTimer() {
+    stopViewerTimer();
+    viewerTimer = setInterval(requestViewers, 10000);
+  }
+
+  function stopViewerTimer() {
+    if (viewerTimer) clearInterval(viewerTimer);
+    viewerTimer = null;
+  }
+
+  function idleText(seconds) {
+    if (seconds < 0) return "не писал";
+    if (seconds < 45) return "только что";
+    if (seconds < 3600) return Math.round(seconds / 60) + " мин назад";
+    return Math.round(seconds / 3600) + " ч назад";
+  }
+
+  function viewerNode(item) {
+    const node = document.createElement("div");
+    node.className = "viewer" + (item.active ? " active" : (item.online ? " online" : " offline"))
+      + (item.lurker ? " lurker" : "");
+    node.dataset.login = item.login;
+    node.dataset.online = item.online ? "1" : "0";
+
+    const head = document.createElement("div");
+    head.className = "v-head";
+    const mark = document.createElement("span");
+    mark.className = "mark";
+    head.appendChild(mark);
+
+    (item.badges || []).forEach(label => {
+      const badge = document.createElement("span");
+      badge.className = "badge " + label;
+      badge.textContent = label === "STREAMER" ? "streamer" : label.toLowerCase();
+      head.appendChild(badge);
+    });
+
+    const nick = document.createElement("span");
+    nick.className = "nick";
+    nick.textContent = item.display || item.login;
+    nick.style.color = nickColor({ color: item.color, user: item.login, display: item.display });
+    head.appendChild(nick);
+
+    if (item.group && item.group !== "viewers") {
+      const group = document.createElement("span");
+      group.className = "v-group";
+      group.textContent = item.group;
+      head.appendChild(group);
+    }
+
+    const right = document.createElement("span");
+    right.className = "v-right";
+    right.textContent = item.lurker
+      ? "молчит"
+      : item.messages + " сообщ · " + idleText(item.idle_seconds);
+    head.appendChild(right);
+
+    node.appendChild(head);
+    return node;
+  }
+
+  function applyViewerFilter() {
+    const query = vSearch.value.trim().toLowerCase();
+    const onlyOnline = vOnline.checked;
+    let shown = 0;
+    vList.querySelectorAll(".viewer").forEach(node => {
+      const match = (!query || node.dataset.login.includes(query));
+      const online = node.dataset.online === "1";
+      const visible = match && (!onlyOnline || online);
+      node.classList.toggle("hidden", !visible);
+      if (visible) shown++;
+    });
+    let hint = vList.querySelector(".empty");
+    if (shown === 0) {
+      if (!hint) {
+        hint = document.createElement("div");
+        hint.className = "empty";
+        vList.appendChild(hint);
+      }
+      hint.textContent = query || onlyOnline ? "никто не подходит под фильтр" : "пока никого не видно";
+      hint.style.display = "";
+    } else if (hint) {
+      hint.style.display = "none";
+    }
+  }
+
+  function renderViewers(payload) {
+    if (!payload) return;
+    lastViewers = payload;
+    const viewers = payload.viewers || [];
+
+    vCards.innerHTML = "";
+    vCards.appendChild(card("всего", String(payload.total || 0)));
+    vCards.appendChild(card("писали", String((payload.total || 0) - (payload.lurkers || 0)),
+                            "за " + (payload.idle_minutes || 15) + " мин"));
+    vCards.appendChild(card("в чате", String(payload.online || 0)));
+    vCards.appendChild(card("молчат", String(payload.lurkers || 0)));
+
+    vNote.innerHTML = "";
+    vNote.appendChild(row("активны сейчас", String(payload.active || 0)));
+    vNote.appendChild(row("каналы", (payload.channels || []).map(c => "#" + c).join(" ") || "—"));
+    if (payload.chatters_available) {
+      vNote.appendChild(row("официальный список", "получен, всего " + (payload.chatters_total || 0)));
+    } else if (payload.chatters_error) {
+      vNote.appendChild(row("официальный список", payload.chatters_error));
+    } else {
+      vNote.appendChild(row("официальный список",
+                            "недоступен — нужен Client-Id и токен модератора"));
+    }
+
+    vList.innerHTML = "";
+    if (!viewers.length) {
+      const none = document.createElement("div");
+      none.className = "empty";
+      none.textContent = "пока никого не видно";
+      vList.appendChild(none);
+      return;
+    }
+    viewers.forEach(item => vList.appendChild(viewerNode(item)));
+    applyViewerFilter();
+  }
+
+  vSearch.addEventListener("input", applyViewerFilter);
+  vOnline.addEventListener("change", applyViewerFilter);
+
+  document.getElementById("reset-stats").addEventListener("click", () => {
+    if (socket && socket.readyState === 1) socket.send(JSON.stringify({ t: "reset_stats" }));
+    flash("статистика сброшена", "");
+  });
+
+  /* ---------------------------------------------------------------- ответы */
+
+  function setCanSend(value) {
+    canSend = !!value;
+    reply.disabled = !canSend;
+    sendButton.disabled = !canSend;
+    reply.placeholder = canSend ? "Ответить в чат…" : "Нужен ник и OAuth-токен (⚙ в окне бота)";
+    if (!canSend) clearReply();
+  }
+
+  /* ------------------------------------------------------- ответ на сообщение */
+
+  let replyTarget = null;
+
+  function startReply(payload, node) {
+    if (!canSend) { flash("нужен ник и OAuth-токен", "bad"); return; }
+    if (String(window.getSelection() || "").trim()) return;   // не мешаем выделять текст
+    const login = payload.user || "";
+    if (!login) return;
+    replyTarget = { id: payload.id, channel: payload.channel || "", login: login };
+    reply.value = "@" + login + " " + reply.value.replace(/^@\S+\s*/, "");
+    replyLabel.textContent = payload.display || login;
+    replyBar.classList.add("show");
+    document.querySelectorAll(".msg.replied").forEach(item => item.classList.remove("replied"));
+    if (node) node.classList.add("replied");
+    setTab("chat");
+    reply.focus();
+  }
+
+  function clearReply() {
+    replyTarget = null;
+    replyBar.classList.remove("show");
+    replyLabel.textContent = "";
+    document.querySelectorAll(".msg.replied").forEach(item => item.classList.remove("replied"));
+  }
+
+  replyCancel.addEventListener("click", clearReply);
+
+  composer.addEventListener("submit", event => {
+    event.preventDefault();
+    const text = reply.value.trim();
+    if (!text || !canSend) return;
+    if (!socket || socket.readyState !== 1) { flash("нет связи с ботом", "bad"); return; }
+    const packet = { t: "send", text };
+    if (replyTarget) {
+      packet.reply_to = replyTarget.id;
+      packet.channel = replyTarget.channel;
+    }
+    socket.send(JSON.stringify(packet));
+    reply.value = "";
+    flash(replyTarget ? "отправляю ответ…" : "отправляю…", "");
+    clearReply();
+  });
+
+  /* ------------------------------------------------------------ подключение */
+
+  function handle(payload) {
+    switch (payload.type) {
+      case "hello": {
+        feed.innerHTML = "";
+        nodes.clear(); order.length = 0;
+        translated = 0; total = 0;
+        channels.textContent = (payload.channels || []).map(c => "#" + c).join(" ");
+        setCanSend(payload.can_send);
+        (payload.history || []).forEach(item => {
+          addMessage(item);
+          total++;
+          if (item.translation && item.translation.text) translated++;
+        });
+        updateCounters();
+        setStatus("online", "Govorok");
+        if (nodes.size === 0) {
+          feed.appendChild(empty);
+          empty.textContent = "Ждём сообщения из чата…";
+          empty.style.display = "";
+        }
+        applyFilter();
+        if (payload.stats) renderStats(payload.stats);
+        if (payload.viewers_summary) {
+          vCards.innerHTML = "";
+          vCards.appendChild(card("всего", String(payload.viewers_summary.total || 0)));
+          vCards.appendChild(card("в чате", String(payload.viewers_summary.online || 0)));
+          vCards.appendChild(card("молчат", String(payload.viewers_summary.lurkers || 0)));
+        }
+        // если док открыт на вкладке зрителей — сразу тянем полный список
+        if (!viewersView.classList.contains("hidden")) requestViewers();
+        scrollToBottom();
+        break;
+      }
+      case "message": {
+        addMessage(payload);
+        total++;
+        updateCounters();
+        if (stick) scrollToBottom();
+        else { jump.classList.add("show"); jump.dataset.wanted = "1"; }
+        break;
+      }
+      case "translation": {
+        const node = nodes.get(payload.id);
+        if (node) {
+          const wasTranslated = node.classList.contains("translated");
+          applyTranslation(node, payload);
+          if (!wasTranslated && payload.text) { translated++; updateCounters(); }
+          if (stick) scrollToBottom();
+        }
+        break;
+      }
+      case "notice": {
+        const line = document.createElement("div");
+        line.className = "notice";
+        line.textContent = payload.text || "";
+        feed.appendChild(line);
+        if (stick) scrollToBottom();
+        break;
+      }
+      case "status": {
+        setStatus(payload.state, "Govorok");
+        break;
+      }
+      case "stats": {
+        renderStats(payload);
+        break;
+      }
+      case "viewers": {
+        renderViewers(payload);
+        break;
+      }
+      case "settings": {
+        // шрифт чата из окна настроек: параметры в ссылке имеют приоритет
+        if (!fontFromUrl && typeof payload.font === "string") {
+          root.style.setProperty("--font", payload.font ? `"${payload.font}", system-ui, sans-serif`
+                                                       : defaultFont);
+        }
+        if (!sizeFromUrl && payload.size) root.style.setProperty("--size", payload.size + "px");
+        break;
+      }
+      case "send_result": {
+        flash(payload.ok ? "отправлено: " + payload.text : "не отправлено: " + (payload.error || "ошибка"),
+              payload.ok ? "ok" : "bad");
+        break;
+      }
+    }
+  }
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const query = token ? "?token=" + encodeURIComponent(token) : "";
+    socket = new WebSocket(`${proto}://${location.host}/ws${query}`);
+
+    socket.onopen = () => {
+      retry = 0;
+      offline.classList.remove("show");
+      setStatus("waiting", "Govorok");
+    };
+    socket.onmessage = event => {
+      try { handle(JSON.parse(event.data)); } catch (err) { console.warn("плохой пакет", err); }
+    };
+    socket.onclose = () => {
+      setStatus("error", "Govorok");
+      setCanSend(false);
+      offline.classList.add("show");
+      retry = Math.min(retry + 1, 8);
+      clearTimeout(timer);
+      timer = setTimeout(connect, 500 * retry + 500);
+    };
+    socket.onerror = () => socket && socket.close();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && socket && socket.readyState > 1) connect();
+  });
+
+  setCanSend(false);
+  // параметр в ссылке важнее сохранённой вкладки
+  const tabParam = params.get("tab");
+  const storedTab = localStorage.getItem("govorok.tab") || localStorage.getItem("botttv.tab");
+  const initialTab = tabParam || storedTab || "chat";
+  setTab(["chat", "viewers", "stats"].includes(initialTab) ? initialTab : "chat");
+  connect();
+})();
+</script>
+</body>
+</html>

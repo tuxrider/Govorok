@@ -1,0 +1,20 @@
+# Линейки: в репозитории храним LF, рабочую копию каждый получает как настроено.
+* text=auto eol=lf
+
+# Windows-скрипты должны оставаться CRLF, иначе cmd.exe их не понимает
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# бинарники
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.wav binary
+*.mp3 binary
+*.onnx binary
+*.bin binary
+
+# экспорт для GitHub Linguist: HTML-доки — это документация, а не код
+vendor/*.md linguist-documentation
+docs/reference/*.md linguist-documentation

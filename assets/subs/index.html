@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Govorok — субтитры</title>
+<style>
+  :root{
+    --font: 28px;
+    --chars: 60;
+    --plate: rgba(10, 12, 16, .58);
+    --text: #f4f7fb;
+    --muted: #b9c2cf;
+  }
+  *{box-sizing:border-box}
+  html,body{
+    margin:0; padding:0; height:100%; width:100%;
+    background:transparent;            /* фон прозрачный: источник в OBS */
+    overflow:hidden;
+    font-family:"Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    user-select:none;
+  }
+  body{
+    display:flex;
+    padding:2vh 3vw;
+    align-items:flex-end;              /* снизу — по умолчанию */
+    justify-content:center;
+  }
+  body.top{align-items:flex-start}
+
+  #stage{
+    display:flex;
+    flex-direction:column;
+    gap:.35em;
+    align-items:center;
+    max-width:calc(var(--chars) * 1.05ch);
+    width:100%;
+  }
+
+  .line{
+    width:fit-content;
+    max-width:100%;
+    background:var(--plate);
+    border-radius:.35em;
+    padding:.22em .6em .28em;
+    text-align:center;
+    animation:pop .12s ease-out;
+  }
+  @keyframes pop{
+    from{opacity:0; transform:translateY(.15em) scale(.99)}
+    to{opacity:1; transform:none}
+  }
+
+  .text{
+    color:var(--text);
+    font-size:var(--font);
+    line-height:1.22;
+    font-weight:600;
+    letter-spacing:.005em;
+    text-shadow:0 2px 6px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.9);
+    word-break:break-word;
+  }
+  .trans{
+    color:var(--muted);
+    font-size:calc(var(--font) * .62);
+    line-height:1.2;
+    margin-top:.12em;
+    text-shadow:0 1px 4px rgba(0,0,0,.85);
+  }
+  .trans:empty{display:none}
+
+  /* незавершённая гипотеза: гасим, чтобы не выглядела как готовый текст */
+  .line.partial{opacity:.62}
+  .line.partial .text{font-style:italic; font-weight:500}
+
+  .line.hidden{opacity:0; transition:opacity .18s ease-out}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+(() => {
+  "use strict";
+  const params = new URLSearchParams(location.search);
+  const clamp = (value, low, high) =>
+    Number.isFinite(value) ? Math.min(high, Math.max(low, value)) : low;
+
+  const cfg = {
+    font: clamp(Number(params.get("font")), 12, 64) || 28,
+    lines: clamp(Number(params.get("lines")), 1, 4) || 2,
+    chars: clamp(Number(params.get("chars")), 10, 200) || 60,
+    hold: clamp(Number(params.get("hold")), 1, 15) || 4,
+    pos: params.get("pos") === "top" ? "top" : "bottom",
+    mode: ["ru", "en", "both"].includes(params.get("mode")) ? params.get("mode") : "both",
+    token: params.get("token") || "",
+    demo: params.get("demo") === "1",
+  };
+
+  const stage = document.getElementById("stage");
+  let finals = [];        // [{id, text, translation}]
+  const pendingTranslations = {};   // припозднившиеся переводы по id строки
+  let partial = null;     // {id, text}
+  let hideTimer = 0;
+  let socket = null;
+  let retry = 0;
+
+  window.govorokSubs = { handle, get cfg() { return cfg; }, get lines() { return finals; } };
+
+  function applySettings(next) {
+    if (!next) return;
+    if (Number.isFinite(Number(next.font))) cfg.font = clamp(Number(next.font), 12, 64);
+    if (Number.isFinite(Number(next.lines))) cfg.lines = clamp(Number(next.lines), 1, 4);
+    if (Number.isFinite(Number(next.chars))) cfg.chars = clamp(Number(next.chars), 10, 200);
+    if (Number.isFinite(Number(next.hold))) cfg.hold = clamp(Number(next.hold), 1, 15);
+    if (next.pos === "top" || next.pos === "bottom") cfg.pos = next.pos;
+    if (["ru", "en", "both"].includes(next.mode)) cfg.mode = next.mode;
+    const root = document.documentElement.style;
+    root.setProperty("--font", cfg.font + "px");
+    root.setProperty("--chars", String(cfg.chars));
+    document.body.classList.toggle("top", cfg.pos === "top");
+    document.body.classList.toggle("bottom", cfg.pos !== "top");
+  }
+
+  // что показать для одной строки в текущем режиме
+  function view(line) {
+    const original = line.original || line.text || "";
+    const translated = line.translation || "";
+    if (cfg.mode === "en" && translated) return { main: translated, sub: "" };
+    if (cfg.mode === "ru") return { main: original, sub: "" };
+    return { main: original || translated, sub: cfg.mode === "both" ? translated : "" };
+  }
+
+  function node(line, isPartial) {
+    const box = document.createElement("div");
+    box.className = "line" + (isPartial ? " partial" : "");
+    const shown = view(line);
+    if (!shown.main && !shown.sub) return null;
+    const text = document.createElement("div");
+    text.className = "text";
+    text.textContent = shown.main;
+    box.appendChild(text);
+    if (shown.sub) {
+      const extra = document.createElement("div");
+      extra.className = "trans";
+      extra.textContent = shown.sub;
+      box.appendChild(extra);
+    }
+    return box;
+  }
+
+  function render() {
+    const rows = [];
+    for (const line of finals.slice(-cfg.lines)) {
+      const built = node(line, false);
+      if (built) rows.push(built);
+    }
+    if (partial) {
+      const built = node(partial, true);
+      if (built) rows.push(built);
+    }
+    stage.replaceChildren(...rows);
+  }
+
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      finals = [];
+      partial = null;
+      render();
+    }, cfg.hold * 1000);
+  }
+
+  function upsert(line) {
+    const index = finals.findIndex(item => item.id === line.id);
+    if (pendingTranslations[line.id] && !line.translation) {
+      line.translation = pendingTranslations[line.id];
+      delete pendingTranslations[line.id];
+    }
+    if (index >= 0) {
+      finals[index] = {...finals[index], ...line,
+                       original: line.original || finals[index].original || line.text};
+    } else if (!finals.length || finals[finals.length - 1].text !== line.text) {
+      finals.push(line);
+    }
+    if (finals.length > cfg.lines) finals = finals.slice(-cfg.lines);
+  }
+
+  function handle(payload) {
+    switch (payload.type) {
+      case "hello":
+        applySettings(payload.subs);
+        break;
+      case "subs_settings":
+        applySettings(payload.subs || payload);
+        render();
+        break;
+      case "subtitle":
+        if (payload.final === false || payload.partial === true) {
+          if (payload.text) partial = {id: payload.id, text: payload.text};
+        } else {
+          if (partial && partial.id === payload.id) partial = null;
+          if (payload.text) upsert({
+            id: payload.id,
+            text: payload.text,
+            // replace = режим «только перевод»: движок прислал уже перевод
+            translation: payload.replace ? payload.text : "",
+            original: payload.original || (payload.replace ? "" : payload.text),
+          });
+        }
+        render();
+        scheduleHide();
+        break;
+      case "subtitle_translation": {
+        // перевод может прийти, когда строка уже ушла с экрана: кладём в резерв
+        const line = finals.find(item => item.id === payload.id);
+        if (line) {
+          line.translation = payload.text || "";
+          render();
+        } else {
+          pendingTranslations[payload.id] = payload.text || "";
+        }
+        break;
+      }
+      case "settings":
+        if (payload.subs) applySettings(payload.subs);
+        break;
+      default:
+        break;                       // остальные пакеты дока здесь не нужны
+    }
+  }
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const query = "?page=subs" + (cfg.token ? "&token=" + encodeURIComponent(cfg.token) : "");
+    socket = new WebSocket(`${proto}://${location.host}/ws${query}`);
+    socket.onopen = () => { retry = 0; };
+    socket.onmessage = event => {
+      try { handle(JSON.parse(event.data)); } catch (err) { /* мусорный пакет */ }
+    };
+    socket.onclose = () => {
+      retry = Math.min(retry + 1, 8);
+      setTimeout(connect, 500 * retry + 400);
+    };
+    socket.onerror = () => socket && socket.close();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && socket && socket.readyState > 1) connect();
+  });
+
+  applySettings(cfg);
+  render();
+  connect();                       // подключаемся всегда: иначе примерка «съедала» эфир
+  if (cfg.demo) {
+    // режим примерки: текст живёт 6 секунд и гаснет, приём субтитров не отключается
+    finals = [
+      {id: "demo-1", text: "Так будет выглядеть твоя речь на стриме",
+       original: "Так будет выглядеть твоя речь на стриме", translation: ""},
+      {id: "demo-2", text: "Вторая строка — для перевода",
+       original: "Вторая строка — для перевода", translation: "Second line is for translation"},
+    ];
+    partial = {id: "demo-3", text: "…а это промежуточная гипотеза, пока ты говоришь"};
+    render();
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      finals = [];
+      partial = null;
+      render();
+    }, 6000);
+  }
+})();
+</script>
+</body>
+</html>

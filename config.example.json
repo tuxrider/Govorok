@@ -1,0 +1,123 @@
+{
+  "twitch": {
+    "channels": [
+      "shroud"
+    ],
+    "nickname": "",
+    "oauth_token": "",
+    "client_id": ""
+  },
+  "llm": {
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key": "",
+    "model": "deepseek-chat",
+    "timeout": 25.0,
+    "max_concurrency": 4,
+    "json_mode": true,
+    "temperature": 0.0,
+    "max_requests_per_minute": 120,
+    "price_in_per_mtok": 0.27,
+    "price_out_per_mtok": 1.1,
+    "currency": "USD"
+  },
+  "translation": {
+    "enabled": true,
+    "target_lang": "ru",
+    "skip_cyrillic": true,
+    "skip_commands": true,
+    "min_length": 3,
+    "max_length": 500,
+    "cache_size": 3000,
+    "system_prompt": ""
+  },
+  "ui": {
+    "render_emotes": true,
+    "max_messages": 400,
+    "font_size": 24,
+    "font_family": ""
+  },
+  "emotes": {
+    "bttv": true,
+    "ffz": true,
+    "seventv": true,
+    "cache_ttl_hours": 12
+  },
+  "dock": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8765,
+    "token": "",
+    "path": "/dock",
+    "history": 60,
+    "only_translated": true
+  },
+  "viewers": {
+    "enabled": true,
+    "idle_minutes": 15,
+    "max_users": 400,
+    "fetch_chatters": true,
+    "poll_seconds": 60
+  },
+  "stt": {
+    "enabled": false,
+    "model": "medium",
+    "device": "auto",
+    "compute_type": "auto",
+    "language": "ru",
+    "beam_size": 2,
+    "chunk_seconds": 2.0,
+    "vad": true,
+    "silence_ms": 500,
+    "input_device": "",
+    "input_gain": 3.0,
+    "translate_to": "en",
+    "subtitle_mode": "both",
+    "vad_engine": "silero",
+    "min_speech_ratio": 0.25,
+    "max_no_speech_prob": 0.75,
+    "min_avg_logprob": -1.05,
+    "font_size": 28,
+    "lines": 2,
+    "max_chars": 60,
+    "hold_seconds": 4.0,
+    "position": "bottom"
+  },
+  "commands": [
+    {
+      "triggers": [
+        "!uptime",
+        "!аптайм"
+      ],
+      "response": "Стрим идёт {uptime}, игра: {game}",
+      "permission": "everyone",
+      "cooldown": 10,
+      "enabled": true,
+      "reply_in_chat": true,
+      "show_in_dock": true
+    },
+    {
+      "triggers": [
+        "!соцсети"
+      ],
+      "response": "Telegram: {1} · YouTube: {2}",
+      "permission": "subscriber",
+      "cooldown": 30,
+      "enabled": true,
+      "reply_in_chat": true,
+      "show_in_dock": true
+    }
+  ],
+  "timers": [
+    {
+      "lines": [
+        "Не забывайте про подписку — она помогает каналу!",
+        "Ставьте 👍 и оставайтесь с нами!"
+      ],
+      "interval_minutes": 15,
+      "enabled": true,
+      "only_when_active": true,
+      "active_window_minutes": 5,
+      "min_messages": 3
+    }
+  ]
+}

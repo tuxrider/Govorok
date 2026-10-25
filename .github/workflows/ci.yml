@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python — IRC, перевод, док, субтитры
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Зависимости
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libportaudio2
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Синтаксис всех модулей
+        run: python -m py_compile main.py selftest.py govorok/*.py tools/*.py
+
+      - name: Автотесты (сеть не нужна: OpenAI, BTTV/FFZ/7TV и Helix мокаются локально)
+        run: python selftest.py
+
+  overlay:
+    name: Оверлей субтитров — логика вкладок и режимов
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Синтаксис JS дока и оверлея
+        run: node tools/check_pages_js.cjs assets/dock/index.html assets/subs/index.html
+
+      - name: Режимы показа субтитров ru / en / both
+        run: node tools/test_overlay.cjs assets/subs/index.html
