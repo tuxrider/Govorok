@@ -142,6 +142,12 @@ foreach ($junk in @(".selftest-tmp", "t.cmd", "selftest-report.txt", "*.cmd~")) 
     Get-ChildItem -LiteralPath $pkg -Filter $junk -Force -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
+# exe-шимы из Scripts (pip.exe, flet.exe, ct2-*.exe …) содержат абсолютный путь до
+# папки СБОРКИ: после переезда они молча работают не оттуда. Всё нужное доступно
+# через python.exe -m … и Govorok.cmd, поэтому чистим
+if (Test-Path (Join-Path $pkg "Scripts")) {
+    Remove-Item (Join-Path $pkg "Scripts\*.exe") -Force -ErrorAction SilentlyContinue
+}
 # LICENSE.txt у embedded python свой, лицензию приложения переименовываем, чтобы в
 # архиве не выглядело как два одинаковых файла
 if (Test-Path (Join-Path $pkg "LICENSE")) {
