@@ -18,6 +18,12 @@ from collections import deque
 
 import flet as ft
 
+try:  # в консоли Windows stdout по умолчанию cp1251 и падает на «→» и «·»
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # noqa: BLE001 - stdout может отсутствовать (окно без консоли)
+    pass
+
 from govorok.commands import (PERMISSION_TITLES, CommandEngine, TimerEngine,
                              render_template)
 from govorok.config import (DATA_DIR, AppConfig, CONFIG_PATH, CommandConfig, STTConfig,
@@ -1952,15 +1958,22 @@ def parse_cli(argv: list[str]) -> tuple[bool, list[str], int | None]:
     return dock_only, channels, port
 
 
-USAGE = """Govorok — бот с переводом чата Twitch, док-панелью для OBS, командами и таймерами.
+USAGE = """Govorok — перевод чата Twitch и субтитры из микрофона, док-панелью в OBS.
 
-Использование:
-  python main.py                       окно настроек + бот + док-панель
-  python main.py --dock                без окна: только бот и док (для автозапуска)
-  python main.py --dock -c xqc --port 9000
-                                       то же, но со своим каналом и портом дока
+Запуск из исходников (нужен Python) или из portable-пакета (python.exe внутри):
 
-Аргументы:
+  Govorok.cmd                          окно настроек + бот + док-панель
+  Govorok.cmd dock                     без окна: только бот и док (для автозапуска)
+  Govorok.cmd dock -c xqc --port 9000   то же, но со своим каналом и портом
+  Govorok.cmd test                      автотесты (сеть и ключи не нужны)
+  Govorok.cmd check                     диагностика микрофона и субтитров
+  Govorok.cmd models                    скачать веса faster-whisper заранее
+
+Напрямую через python то же самое:
+  python main.py                         окно настроек
+  python main.py --dock                  без окна
+
+Аргументы main.py:
   -c, --channel <канал>   канал (можно несколько через запятую)
       --port <номер>      порт док-панели (0 — любой свободный)
       --dock              не открывать окно настроек

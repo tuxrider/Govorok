@@ -1975,6 +1975,10 @@ def test_ci_workflows() -> None:
         check("pyyaml установлен", False, "pip install pyyaml")
         return
 
+    if not Path(".github").exists():
+        # в релизном portable-пакете .github не раздаётся — проверять там нечего
+        check("workflow-файлы: в этом окружении .github отсутствует, пропуск", True)
+        return
     files = sorted(Path(x) for x in glob.glob(".github/workflows/*.yml")
                    + glob.glob(".github/workflows/*.yaml"))
     check("workflow-файлы найдены", bool(files), str(files))

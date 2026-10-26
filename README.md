@@ -557,6 +557,48 @@ VRAM (замерено: 3732 → 1745 МБ). Режим «сдвинуть в RA
 * Режим без окна (`python main.py --dock`) тоже запускает субтитры, если они включены:
   один процесс на бота и на оверлей.
 
+## Релизный portable-пакет
+
+Для тех, у кого Python ставить не хочется: `tools\make_portable.ps1` собирает папку со
+**встроенным Python** — распаковал архив, двойной щелчок по `Govorok.cmd`, всё работает.
+
+```powershell
+.\.venv\Scripts\python.exe -c "print(1)"   # просто чтобы убедиться, что окружение живо
+powershell -ExecutionPolicy Bypass -File tools\make_portable.ps1 -Zip
+#   -Out D:\Releases   куда класть   -SkipTest  не гонять selftest
+#   -SkipInstall       пересобрать без переустановки зависимостей
+```
+
+Что получается (`D:\Project
+Что получается (`D:\Project\release\Govorok-<версия>-win-x64.zip`, ~139 МБ):
+
+```
+Govorok.cmd          ← единая точка запуска: окно, dock, test, check, models, pip
+python.exe / pythonw.exe + Lib\  ← встроенный интерпретатор и зависимости
+main.py, govorok\, assets\, tools\, selftest.py
+README.txt           записка получателю на пять минут
+Models\              пустая: веса faster-whisper приложение качает само
+```
+
+Как это устроено и почему так:
+
+* Берётся официальный `python-3.12.x-embed-amd64.zip`, файлы поднимаются в корень
+  пакета, а `python312._pth` дописывает `Lib/site-packages` и `.` — поэтому
+  `import govorok` работает без всяких `PYTHONPATH`.
+* **Веса в архив не кладутся** (`small` ≈ 486 МБ, `medium` ≈ 1.5 ГБ): получатель скачивает
+  их сам при первом включении субтитров, или заранее — `Govorok.cmd models`.
+* Окно поднимается через `pythonw.exe`, консоль не мозолит глаза; если окно не
+  открылось — `Govorok.cmd gui` покажет текст ошибки прямо в терминале.
+* Перед публикацией пакет **проверяется самим собой**: `selftest.py` прогоняется
+  встроенным интерпретатором, и при провале сборка падает.
+* Архив пишет `bsdtar` (`System32	ar.exe`), а не `Compress-Archive`: последний
+  кладёт в zip пути с обратным слэшем, и `unzip` на такое ругается.
+
+Лаунчер ищёт интерпретатор сам: встроенный `python.exe` → `.venv` → `python` из `PATH`.
+Тот же `Govorok.cmd` лежит в корне репозитория и работает на исходниках, так что
+`run.bat`/`run-dock.bat` остались привычными, но `Govorok.cmd test` и
+`Govorok.cmd check` доступны и без сборки.
+
 ## Тесты
 
 ```powershell

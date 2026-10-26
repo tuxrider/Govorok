@@ -14,6 +14,13 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
+try:  # консоль Windows живёт в cp1251 и падает на «→», «·», «×»: переводим stdout в UTF-8
+    for _stream in (sys.stdout, sys.stderr):
+        if _stream is not None:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # noqa: BLE001 - у GUI-процесса потоков может не быть
+    pass
+
 #: чем заменяются секреты в дампах конфигов (логов, тестов, отчётов диагностики)
 REDACTED = "<redacted>"
 
