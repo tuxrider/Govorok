@@ -33,7 +33,7 @@ from .stats import stats_payload
 from .streaminfo import StreamInfo
 from .stt import SubtitleService
 from .translator import Translation, Translator
-from .viewers import ChattersPoller, ViewerRegistry
+from .viewers import ChattersPoller, ViewerRegistry, viewers_snapshot
 
 DOCK_PAGE = APP_DIR / "assets" / "dock" / "index.html"
 SUBS_PAGE = APP_DIR / "assets" / "subs" / "index.html"
@@ -462,7 +462,8 @@ class DockHub:
                     snapshot = self.viewers_provider()
                     hello["viewers_summary"] = {key: snapshot.get(key) for key in
                                                 ("total", "active", "online", "lurkers",
-                                                 "chatters_available", "chatters_error")}
+                                                 "chatters_available", "chatters_error",
+                                                 "chatters_reason", "chatters_total")}
                 except Exception:  # noqa: BLE001
                     pass
             await ws.send(json.dumps(hello, ensure_ascii=False))
@@ -622,9 +623,12 @@ class DockRunner:
     # ------------------------------------------------------------ зрители
 
     def viewers_snapshot(self) -> dict:
-        """Снимок для вкладки «Зрители»."""
-        return self.viewers.snapshot(idle_minutes=self.config.viewers.idle_minutes,
-                                     limit=self.config.viewers.max_users)
+        """Снимок для вкладки «Зрители» (включая причину, по которой списка ещё нет)."""
+        rooms = self.known_rooms()
+        self.chatters.refresh_blocked_reason(len(rooms))
+        return viewers_snapshot(self.viewers, self.chatters,
+                                idle_minutes=self.config.viewers.idle_minutes,
+                                limit=self.config.viewers.max_users)
 
     def known_rooms(self) -> list[tuple[str, str]]:
         return list(self._rooms.items())

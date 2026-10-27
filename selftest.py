@@ -1245,7 +1245,7 @@ async def test_dock_runner(tmp: Path) -> None:
 
 async def test_viewers(tmp: Path) -> None:
     print("\n[10/13] Вкладка «Зрители»")
-    from govorok.viewers import ChattersPoller, ViewerRegistry
+    from govorok.viewers import ChattersPoller, ViewerRegistry, viewers_snapshot
 
     registry = ViewerRegistry()
     now = time.time()
@@ -1292,6 +1292,53 @@ async def test_viewers(tmp: Path) -> None:
     registry.apply_chatters("xqc", [], error="нужен модератор в канале (403)")
     check("ошибка официального списка сохраняется",
           "403" in registry.snapshot()["chatters_error"], registry.snapshot()["chatters_error"])
+
+    # --- регресс: провал не должен выглядеть как «список получен, всего 0»
+    failed_only = ViewerRegistry()
+    failed_only.apply_chatters("xqc", [], error="токен не подошёл (401)")
+    snap = failed_only.snapshot()
+    check("провал не считается успехом", snap["chatters_available"] is False,
+          str({k: snap[k] for k in ("chatters_available", "chatters_total")}))
+    check("панель увидит настоящую ошибку, а не ноль",
+          snap["chatters_error"] == "токен не подошёл (401)"
+          and snap["chatters_tried_at"] > 0, str(snap["chatters_error"]))
+
+    # --- причина «почти списка нет» вместо абстрактной заглушки
+    reason_cfg = AppConfig()
+    quiet_poller = ChattersPoller(ViewerRegistry(), lambda: reason_cfg)
+    check("без Client-Id причина конкретная",
+          quiet_poller.refresh_blocked_reason(0) == "нет Client-Id",
+          quiet_poller.blocked_reason)
+    reason_cfg.twitch.client_id = "client-id"
+    check("без токена причина конкретная",
+          quiet_poller.refresh_blocked_reason(0) == "нет OAuth-токена",
+          quiet_poller.blocked_reason)
+    reason_cfg.twitch.oauth_token = "oauth:token"
+    check("без комнаты — ждём подключение",
+          quiet_poller.refresh_blocked_reason(0) == "ждём подключения к каналу",
+          quiet_poller.blocked_reason)
+    check("с комнатой, но без успеха — ждём первый опрос",
+          "первый опрос" in quiet_poller.refresh_blocked_reason(2), quiet_poller.blocked_reason)
+    reason_cfg.viewers.fetch_chatters = False
+    check("выключенный опрос называет себя честно",
+          quiet_poller.refresh_blocked_reason(2) == "опрос выключен в настройках",
+          quiet_poller.blocked_reason)
+
+    ok_registry = ViewerRegistry()
+    ok_registry.apply_chatters("xqc", [("lurker", "viewers")], total=7)
+    ok_poller = ChattersPoller(ok_registry, lambda: reason_cfg)
+    ok_poller.last_ok_at = time.time()
+    check("успешный список перекривает «ждём»",
+          ok_poller.refresh_blocked_reason(0) == "", ok_poller.blocked_reason)
+    merged = viewers_snapshot(ok_registry, ok_poller, idle_minutes=15, limit=10)
+    check("снимок несёт причину вместе с реестром",
+          merged["chatters_available"] is True and merged["chatters_reason"] == ""
+          and merged["chatters_total"] == 7, str(merged.get("chatters_reason")))
+    panel_html = (tmp.parent / "assets" / "dock" / "index.html")
+    if not panel_html.exists():      # tmp — это .selftest-tmp рядом с репозиторием
+        panel_html = Path(__file__).resolve().parent / "assets" / "dock" / "index.html"
+    check("устаревшая заглушка из панели убрана",
+          "токен модератора" not in panel_html.read_text(encoding="utf-8"), str(panel_html))
     registry.clear()
     check("реестр очищается", registry.snapshot()["total"] == 0)
 

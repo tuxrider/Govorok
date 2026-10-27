@@ -75,7 +75,8 @@ class ViewerRegistry:
         self.on_log = on_log
         self.max_viewers = max(100, max_viewers)
         self._viewers: dict[tuple[str, str], Viewer] = {}     # (канал, логин) -> зритель
-        self._chatters_at: dict[str, float] = {}
+        self._chatters_at: dict[str, float] = {}      # когда по каналу последний раз УСПЕШНО пришёл список
+        self._chatters_tried_at: dict[str, float] = {}   # когда была последняя попытка (успех или нет)
         self._chatters_total: dict[str, int] = {}
         self._chatters_error: dict[str, str] = {}
         self.messages_seen = 0
@@ -135,15 +136,22 @@ class ViewerRegistry:
         for key, viewer in self._viewers.items():
             if key[0] == channel and key not in seen:
                 viewer.in_chat = False
+        self._chatters_tried_at[channel] = now
+        if error:
+            # провал успехом не считается: иначе панель клялась бы «список получен, всего 0»
+            self._chatters_error[channel] = error
+            self._prune()
+            return
         self._chatters_at[channel] = now
         if total is not None:
             self._chatters_total[channel] = total
-        self._chatters_error[channel] = error
+        self._chatters_error.pop(channel, None)
         self._prune()
 
     def clear(self) -> None:
         self._viewers.clear()
         self._chatters_at.clear()
+        self._chatters_tried_at.clear()
         self._chatters_total.clear()
         self._chatters_error.clear()
         self.messages_seen = 0
@@ -176,6 +184,7 @@ class ViewerRegistry:
         viewers.sort(key=sort_key)
         channels = sorted({viewer.channel for viewer in self._viewers.values() if viewer.channel})
         fetched = max(self._chatters_at.values(), default=0.0)
+        tried = max(self._chatters_tried_at.values(), default=0.0)
         errors = {channel: error for channel, error in self._chatters_error.items() if error}
         return {
             "type": "viewers",
@@ -187,6 +196,7 @@ class ViewerRegistry:
             "channels": channels,
             "chatters_available": bool(self._chatters_at),
             "chatters_fetched_at": fetched,
+            "chatters_tried_at": tried,
             "chatters_total": max(self._chatters_total.values(), default=0),
             "chatters_error": next(iter(errors.values()), ""),
             "viewers": viewers[:limit],
@@ -198,8 +208,8 @@ class ChattersPoller:
     """Периодически забирает официальный список зрителей через Helix.
 
     Без Client-Id и модераторского токена не запускается — вкладка «Зрители»
-    в этом случае работает на активности чата, о чём сообщает сама.
-    """
+    в этом случае работает на активности чата, и честно говорит причину через
+    ``blocked_reason`` (панель выводит её в блоке «официальный список»)."""
 
     def __init__(self, registry: ViewerRegistry, config_provider: Callable[[], AppConfig], *,
                  on_log: Callable[[str], None] | None = None,
@@ -213,6 +223,8 @@ class ChattersPoller:
         self.last_error = ""
         self.last_ok_at = 0.0
         self.requests = 0
+        self.rooms_count = 0        # сколько комнат известно приложению сейчас
+        self.blocked_reason = ""    # почему официального списка ещё нет (пусто — всё в порядке)
 
     # ------------------------------------------------------------ утилиты
 
@@ -224,9 +236,38 @@ class ChattersPoller:
                 pass
 
     def enabled(self) -> bool:
+        """Можно ли вообще опрашивать Helix (нужны Client-Id, токен и разрешение в настройках)."""
         twitch = self._config().twitch
         return bool(twitch.client_id.strip() and twitch.oauth_token.strip()
                     and self._config().viewers.fetch_chatters)
+
+    def refresh_blocked_reason(self, rooms: int | None = None) -> str:
+        """Обновить и вернуть причину, по которой официального списка зрителей нет.
+
+        Без этого панель показывала абстракцию «нужен Client-Id и токен модератора»
+        даже когда всё настроено, просто опрос ещё не успел пройти.
+        """
+        if rooms is not None:
+            self.rooms_count = rooms
+        twitch = self._config().twitch
+        if self.registry.snapshot()["chatters_available"]:
+            reason = ""                      # список уже есть — не врать про «ждём»
+        elif not self._config().viewers.fetch_chatters:
+            reason = "опрос выключен в настройках"
+        elif not twitch.client_id.strip():
+            reason = "нет Client-Id"
+        elif not twitch.oauth_token.strip():
+            reason = "нет OAuth-токена"
+        elif not self.rooms_count:
+            reason = "ждём подключения к каналу"
+        elif self.last_ok_at:
+            reason = ""                      # хотя бы один успех был — показываем счётчик
+        elif self.last_error:
+            reason = self.last_error          # например 403: бот не модератор канала
+        else:
+            reason = f"ждём первый опрос (раз в {max(20, int(self._config().viewers.poll_seconds))} с)"
+        self.blocked_reason = reason
+        return reason
 
     def _client_instance(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -301,10 +342,13 @@ class ChattersPoller:
         """Опрашивать каналы с заданным интервалом, пока задача не отменена."""
         while True:
             try:
+                rooms = channels_provider()
+                self.refresh_blocked_reason(len(rooms))
                 if self.enabled():
-                    for room_id, channel in channels_provider():
+                    for room_id, channel in rooms:
                         await self.fetch(room_id, channel)
                         await asyncio.sleep(1.0)
+                    self.refresh_blocked_reason(len(rooms))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -321,3 +365,16 @@ class ChattersPoller:
         if response.status_code == 404:
             return "канал не найден (404)"
         return f"HTTP {response.status_code}"
+
+
+def viewers_snapshot(registry: ViewerRegistry, poller: "ChattersPoller | None", *,
+                     idle_minutes: int, limit: int) -> dict:
+    """Снимок для вкладки «Зрители»: реестр + честная причина от поллера.
+
+    Реестр не знает про Helix, а поллер не знает про реестр — по отдельности они
+    не видят ответа на вопрос «почему официального списка ещё нет», поэтому
+    склеиваем здесь: иначе панель вынуждена угадывать и показывает абстракцию.
+    """
+    snapshot = registry.snapshot(idle_minutes=idle_minutes, limit=limit)
+    snapshot["chatters_reason"] = poller.blocked_reason if poller is not None else ""
+    return snapshot

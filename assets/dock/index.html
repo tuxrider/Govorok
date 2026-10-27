@@ -735,12 +735,19 @@
     vNote.appendChild(row("активны сейчас", String(payload.active || 0)));
     vNote.appendChild(row("каналы", (payload.channels || []).map(c => "#" + c).join(" ") || "—"));
     if (payload.chatters_available) {
-      vNote.appendChild(row("официальный список", "получен, всего " + (payload.chatters_total || 0)));
+      const okLine = "получен, всего " + (payload.chatters_total || 0);
+      // успех был, но последний опрос упал — честно показываем обе правды
+      vNote.appendChild(row("официальный список",
+                            payload.chatters_error ? okLine + " · последняя ошибка: " + payload.chatters_error
+                                                   : okLine));
     } else if (payload.chatters_error) {
       vNote.appendChild(row("официальный список", payload.chatters_error));
+    } else if (payload.chatters_reason) {
+      vNote.appendChild(row("официальный список", payload.chatters_reason));
     } else {
       vNote.appendChild(row("официальный список",
-                            "недоступен — нужен Client-Id и токен модератора"));
+                            "ещё не опрашивался — нужен Client-Id и токен со scope "
+                            + "moderator:read:chatters, бот должен быть модератором канала"));
     }
 
     vList.innerHTML = "";

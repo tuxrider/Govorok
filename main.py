@@ -36,7 +36,7 @@ from govorok.stats import estimate_cost, stats_payload
 from govorok.streaminfo import StreamInfo
 from govorok.stt import SubtitleService, device_key
 from govorok.translator import Translator
-from govorok.viewers import ChattersPoller, ViewerRegistry
+from govorok.viewers import ChattersPoller, ViewerRegistry, viewers_snapshot
 
 # --------------------------------------------------------------------- тема
 
@@ -994,8 +994,10 @@ class BotApp:
         )
 
     def viewers_snapshot(self) -> dict:
-        return self.viewers.snapshot(idle_minutes=self.config.viewers.idle_minutes,
-                                     limit=self.config.viewers.max_users)
+        self.chatters.refresh_blocked_reason(len(self._rooms))
+        return viewers_snapshot(self.viewers, self.chatters,
+                                idle_minutes=self.config.viewers.idle_minutes,
+                                limit=self.config.viewers.max_users)
 
     def reset_stats(self) -> None:
         self.messages_total = self.translated_total = 0
